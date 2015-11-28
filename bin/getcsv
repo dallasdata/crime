@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+#
+# The MIT License (MIT)
+#
+# Copyright (c) 2015 dallasdata
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+'''
+Download a CSV of all DPD crime data.
+'''
+
+import argparse
+import csv
+import datetime
+import logging
+import os.path
+import pyproj
+import sys
+import traceback
+
+# Add src/ directory to PYTHONPATH so that this can be run without the operator
+# having to configure that manually
+sys.path += [os.path.join(os.path.dirname(sys.argv[0]), '..', 'src')]
+
+import dallasdata.crime.socrata;
+
+_SOCRATA_HOSTNAME = 'www.dallasopendata.com'
+
+_SOCRATA_DATASET = 'tbnj-w5hb'
+
+_LOGGER = logging.getLogger(__name__)
+
+# Guessed that PointX, PointY are in SPCS/NAD83. This appears correct based on
+# spot-checking a few locations with their geocoded addresses.
+_PROJ = pyproj.Proj(init='nad83:4202', units='us-ft', preserve_units=True)
+
+ap = argparse.ArgumentParser(
+        description='''
+Download crime data from the Dallas Police Department and write it to stdout in CSV.
+''')
+ap.add_argument(
+        '-v', '--verbose', action='count', dest='verbosity', default=0,
+        help='''
+increase global logging verbosity; can be used multiple times
+''')
+args = ap.parse_args()
+
+logging.basicConfig(
+        level=logging.ERROR - args.verbosity * 10,
+        style='{',
+        format='{asctime} {levelname} [{name}]: {message}')
+
+cw = csv.DictWriter(sys.stdout, [
+        'start_date',
+        'start_time',
+        'end_date',
+        'end_time',
+        'report_date',
+        'report_time',
+        'street_number',
+        'street',
+        'apartment',
+        'city',
+        'state',
+        'zipcode',
+        'longitude',
+        'latitude',
+        'offense_description',
+    ])
+cw.writeheader()
+
+for cr in dallasdata.crime.socrata.dataset_rows(
+        _SOCRATA_HOSTNAME, _SOCRATA_DATASET):
+    r = {}
+
+    if 'date1' in cr:
+        d = datetime.datetime.strptime(cr['date1'], '%Y-%m-%dT%H:%M:%S')
+        r['start_date'] = d.strftime('%Y-%m-%d')
+
+    if 'time1' in cr:
+        t = datetime.datetime.strptime(cr['time1'], '%H:%M')
+        r['start_time'] = t.strftime('%H:%M')
+
+    if 'date2' in cr:
+        d = datetime.datetime.strptime(cr['date2'], '%Y-%m-%dT%H:%M:%S')
+        r['end_date'] = d.strftime('%Y-%m-%d')
+
+    if 'time2' in cr:
+        t = datetime.datetime.strptime(cr['time2'], '%H:%M')
+        r['end_time'] = t.strftime('%H:%M')
+
+    if 'callreceived' in cr:
+        d = datetime.datetime.strptime(cr['callreceived'], '%Y-%m-%dT%H:%M:%S')
+        r['report_date'] = d.strftime('%Y-%m-%d')
+        r['report_time'] = d.strftime('%H:%M')
+
+    if 'pointx' in cr and 'pointy' in cr:
+        lng, lat = _PROJ(float(cr['pointx']),
+                float(cr['pointy']),
+                inverse=True,
+                errcheck=True)
+        r['longitude'] = lng
+        r['latitude'] = lat
+
+    r['street_number'] = cr.get('blk')
+    r['street'] = cr.get('strname')
+    r['apartment'] = cr.get('aptnum')
+    r['city'] = cr.get('city')
+    r['state'] = cr.get('state')
+    r['zipcode'] = cr.get('zipcode')
+    r['offense_description'] = cr.get('ucroffdesc')
+
+    cw.writerow(r)
+
+# vim:filetype=python
