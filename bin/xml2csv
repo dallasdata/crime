@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+#
+# The MIT License (MIT)
+#
+# Copyright (c) 2015 dallasdata
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+'''
+Transform the XML archives from prior to June 1 2014 into a CSV file.
+'''
+
+import argparse
+import contextlib
+import csv
+import datetime
+import xml.sax
+import logging
+import os.path
+import sys
+
+# Add src/ directory to PYTHONPATH so that this can be run without the operator
+# having to configure that manually
+sys.path += [os.path.join(os.path.dirname(sys.argv[0]), '..', 'src')]
+
+STREET_SUFFIXES = [
+        'AV',
+        'AVE',
+        'BLVD',
+        'CIR',
+        'CT',
+        'DR',
+        'EXT',
+        'FRW',
+        'FRWY',
+        'HWY',
+        'LA',
+        'LN',
+        'PKW',
+        'PKWY',
+        'PL',
+        'PWY',
+        'RD',
+        'RDG',
+        'ST',
+        'TR',
+        'TRAIL',
+        'TRL',
+        'WAY',
+        'WY',]
+
+
+# Context manager for opening files (or stdin)
+@contextlib.contextmanager
+def open_input(fp, mode='r'):
+    if fp == '-':
+        yield sys.stdin
+    else:
+        f = open(fp, mode)
+        yield f
+        f.close()
+
+
+# SAX content handler for DPD crimes
+class DPDSAXContentHandler(xml.sax.ContentHandler):
+    def __init__(self, cb):
+        self.callback = cb
+        self.in_record = False
+        self.attr_name = None
+        self.attr_content = ''
+        self.record_attrs = {}
+
+    def setDocumentLocator(self, loc):
+        self.locator = loc
+
+    def startElement(self, name, attrs):
+        name = name.lower()
+
+        if not self.in_record:
+            self.in_record = name == 'record'
+        else:
+            assert name != 'record'
+            self.attr_name = name
+
+    def characters(self, content):
+        self.attr_content += content
+
+    def endElement(self, name):
+        name = name.lower()
+
+        if name == self.attr_name:
+            self.record_attrs[self.attr_name] = self.attr_content.strip()
+            self.attr_name = None
+            self.attr_content = ''
+
+        if name == 'record':
+            assert self.in_record
+            self.in_record = False
+            self.callback(self.record_attrs)
+
+
+ap = argparse.ArgumentParser(
+        description='''
+Convert incident data from prior to June 1, 2014 to our normalized CSV format.
+''')
+ap.add_argument(
+        '-v', '--verbose', action='count', dest='verbosity', default=0,
+        help='''
+increase global logging verbosity; can be used multiple times
+''')
+ap.add_argument('file_paths', nargs='*',
+        help='''
+file(s) from which to read XML dumps; if empty stdin is used
+''')
+args = ap.parse_args()
+
+logging.basicConfig(
+        level=logging.ERROR - args.verbosity * 10,
+        style='{',
+        format='{asctime} {levelname} [{name}]: {message}')
+
+if len(args.file_paths) == 0:
+    args.file_paths += ['-']
+
+for fp in args.file_paths:
+    cw = csv.DictWriter(sys.stdout, [
+          'start_date',
+          'start_time',
+          'end_date',
+          'end_time',
+          'report_date',
+          'report_time',
+          'street_number',
+          'street',
+          'apartment',
+          'city',
+          'state',
+          'zipcode',
+          'longitude',
+          'latitude',
+          'offense_description',
+      ])
+    cw.writeheader()
+
+    def record_callback(xr):
+        dr = {}
+
+        d = datetime.datetime.strptime(xr['offensedate'], '%m/%d/%Y')
+        dr['start_date'] = dr['end_date'] = d.strftime('%Y-%m-%d')
+
+        d = datetime.datetime.strptime(xr['offensestarttime'], '%H:%M:%S')
+        dr['start_time'] = d.strftime('%H:%M')
+
+        d = datetime.datetime.strptime(xr['offensestoptime'], '%H:%M:%S')
+        dr['end_time'] = d.strftime('%H:%M')
+
+        d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
+        dr['report_date'] = d.strftime('%Y-%m-%y')
+
+        d = datetime.datetime.strptime(xr['offensetimedispatched'], '%H:%M')
+        dr['report_time'] = d.strftime('%H:%M')
+
+        try:
+            dr['street_number'] = int(xr.get('offenseblock'))
+        except:
+            pass
+
+        dr['street'] = xr.get('offensestreet')
+        for ss in STREET_SUFFIXES:
+            if dr['street'].endswith(ss):
+                dr['street'] = dr['street'][:-1 * len(ss)] + ' ' + ss
+                break
+        else:
+            logging.info('No suffix for {}'.format(dr['street']))
+
+        try:
+            dr['apartment'] = int(xr.get('offenseapartment'))
+        except:
+            pass
+
+        dr['city'] = xr.get('offensecity')
+        dr['state'] = xr.get('offensestate')
+        dr['zipcode'] = xr.get('offensezip')
+        dr['offense_description'] = xr.get('offensedescription')
+
+        cw.writerow(dr)
+
+    xp = xml.sax.make_parser()
+    xp.setContentHandler(DPDSAXContentHandler(record_callback))
+
+    with open_input(fp, 'r') as f:
+        xp.parse(f)
