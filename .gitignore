@@ -1,3 +1,6 @@
 __pycache__
+env
 *.sw*
 NOTES
+requirements.txt
+*.egg-info

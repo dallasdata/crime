@@ -28,8 +28,9 @@ setup(
     author='Peter Griess',
     author_email='pg@std.in',
     package_dir={'': 'src'},
-    packages=['dallasdata_crime'],
+    packages=['dallasdata.crime'],
     install_requires=[
+        'postgres',
         'pyproj',
     ],
 )

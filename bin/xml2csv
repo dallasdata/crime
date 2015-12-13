@@ -35,10 +35,6 @@ import logging
 import os.path
 import sys
 
-# Add src/ directory to PYTHONPATH so that this can be run without the operator
-# having to configure that manually
-sys.path += [os.path.join(os.path.dirname(sys.argv[0]), '..', 'src')]
-
 STREET_SUFFIXES = [
         'AV',
         'AVE',
