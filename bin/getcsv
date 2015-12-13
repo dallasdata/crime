@@ -28,17 +28,12 @@ Download a CSV of all DPD crime data.
 
 import argparse
 import csv
+import dallasdata.crime.socrata;
 import datetime
 import logging
 import os.path
 import pyproj
 import sys
-
-# Add src/ directory to PYTHONPATH so that this can be run without the operator
-# having to configure that manually
-sys.path += [os.path.join(os.path.dirname(sys.argv[0]), '..', 'src')]
-
-import dallasdata.crime.socrata;
 
 _SOCRATA_HOSTNAME = 'www.dallasopendata.com'
 

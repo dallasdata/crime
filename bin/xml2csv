@@ -21,6 +21,22 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+#
+# Ideas:
+#
+#   - Record sanitized address information from PostGIS rather than the raw
+#     contents of the XML
+#
+#   - Handle 1xx addresses where only the block number is recorded by emitting
+#     a confidence interval (somehow)
+#
+#   - Use trigram or soundex capabilities in Postgres to match know-extant
+#     streets and their types (from TIGER) with mashed up junk from XML dumps.
+#     Even easier, create a list of kown-extant streets from TIGER concatenated
+#     with their suffixes (or expanded list of all possible suffixes) and use
+#     that to figure out suffixes matches. With the list of queries (from XMLs)
+#     and known-goods (from TIGER) each sorted, this should be O(N) to get good
+#     matches. Will also help with 14-character truncation woes.
 
 '''
 Transform the XML archives from prior to June 1 2014 into a CSV file.
@@ -30,14 +46,16 @@ import argparse
 import contextlib
 import csv
 import datetime
-import xml.sax
 import logging
 import os.path
+from postgres import Postgres
 import sys
+import xml.sax
 
 STREET_SUFFIXES = [
         'AV',
         'AVE',
+        'BL',
         'BLVD',
         'CIR',
         'CT',
@@ -134,43 +152,62 @@ logging.basicConfig(
 if len(args.file_paths) == 0:
     args.file_paths += ['-']
 
+db = Postgres('postgres://geocoder:geocoder@localhost/dallas')
+
+cw = csv.DictWriter(sys.stdout, [
+      'start_date',
+      'start_time',
+      'end_date',
+      'end_time',
+      'report_date',
+      'report_time',
+      'street_number',
+      'street',
+      'apartment',
+      'city',
+      'state',
+      'zipcode',
+      'longitude',
+      'latitude',
+      'offense_description',
+  ])
+cw.writeheader()
+
 for fp in args.file_paths:
-    cw = csv.DictWriter(sys.stdout, [
-          'start_date',
-          'start_time',
-          'end_date',
-          'end_time',
-          'report_date',
-          'report_time',
-          'street_number',
-          'street',
-          'apartment',
-          'city',
-          'state',
-          'zipcode',
-          'longitude',
-          'latitude',
-          'offense_description',
-      ])
-    cw.writeheader()
+    logging.warning('processing {}'.format(fp))
 
     def record_callback(xr):
         dr = {}
 
-        d = datetime.datetime.strptime(xr['offensedate'], '%m/%d/%Y')
-        dr['start_date'] = dr['end_date'] = d.strftime('%Y-%m-%d')
+        try:
+            d = datetime.datetime.strptime(xr['offensedateofoccurence1'], '%m/%d/%Y')
+            dr['start_date'] = d.strftime('%Y-%m-%d')
+        except:
+            pass
 
-        d = datetime.datetime.strptime(xr['offensestarttime'], '%H:%M:%S')
-        dr['start_time'] = d.strftime('%H:%M')
+        try:
+            d = datetime.datetime.strptime(xr['offensetimeofoccurence1'], '%H:%M')
+            dr['start_time'] = d.strftime('%H:%M')
+        except:
+            pass
 
-        d = datetime.datetime.strptime(xr['offensestoptime'], '%H:%M:%S')
-        dr['end_time'] = d.strftime('%H:%M')
+        try:
+            d = datetime.datetime.strptime(xr['offensedateofoccurence2'], '%m/%d/%Y')
+            dr['end_date'] = d.strftime('%Y-%m-%d')
+        except:
+            pass
 
-        d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
-        dr['report_date'] = d.strftime('%Y-%m-%y')
+        try:
+            d = datetime.datetime.strptime(xr['offensetimeofoccurence2'], '%H:%M')
+            dr['end_time'] = d.strftime('%H:%M')
+        except:
+            pass
 
-        d = datetime.datetime.strptime(xr['offensetimedispatched'], '%H:%M')
-        dr['report_time'] = d.strftime('%H:%M')
+        try:
+            d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
+            dr['report_date'] = d.strftime('%Y-%m-%y')
+        except:
+            pass
 
         try:
             dr['street_number'] = int(xr.get('offenseblock'))
@@ -183,7 +220,7 @@ for fp in args.file_paths:
                 dr['street'] = dr['street'][:-1 * len(ss)] + ' ' + ss
                 break
         else:
-            logging.info('No suffix for {}'.format(dr['street']))
+            logging.debug('No suffix for {}'.format(dr['street']))
 
         try:
             dr['apartment'] = int(xr.get('offenseapartment'))
@@ -194,6 +231,21 @@ for fp in args.file_paths:
         dr['state'] = xr.get('offensestate')
         dr['zipcode'] = xr.get('offensezip')
         dr['offense_description'] = xr.get('offensedescription')
+
+        # If we have an address, attempt to geocode it
+        if 'street_number' in dr and 'street' in dr:
+            r = db.one("select g.rating, ST_X(g.geomout), ST_Y(g.geomout) from geocode('{street_number} {street}, {city}, {state} {zip}', 1) as g;".format(
+                street_number=dr['street_number'],
+                street=dr['street'],
+                city=dr['city'],
+                state=dr['state'],
+                zip=dr['zipcode']))
+
+            # Skip results with confidence worse than 10. The range for this
+            # value is 0-100?, with lower is more confident)
+            if r is not None and r.rating <= 10:
+                dr['longitude'] = r.st_x
+                dr['latitude'] = r.st_y
 
         cw.writerow(dr)
 
