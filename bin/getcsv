@@ -60,12 +60,21 @@ logging.basicConfig(
         format='{asctime} {levelname} [{name}]: {message}')
 
 cw = csv.DictWriter(sys.stdout, [
-        'start_date',
-        'start_time',
-        'end_date',
-        'end_time',
-        'report_date',
-        'report_time',
+        'start_date_year',
+        'start_date_month',
+        'start_date_day',
+        'start_time_hour',
+        'start_time_min',
+        'end_date_year',
+        'end_date_month',
+        'end_date_day',
+        'end_time_hour',
+        'end_time_min',
+        'report_date_year',
+        'report_date_month',
+        'report_date_day',
+        'report_time_hour',
+        'report_time_min',
         'street_number',
         'street',
         'apartment',
@@ -84,24 +93,33 @@ for cr in dallasdata.crime.socrata.dataset_rows(
 
     if 'date1' in cr:
         d = datetime.datetime.strptime(cr['date1'], '%Y-%m-%dT%H:%M:%S')
-        r['start_date'] = d.strftime('%Y-%m-%d')
+        r['start_date_year'] = d.strftime('%Y')
+        r['start_date_month'] = d.strftime('%m')
+        r['start_date_day'] = d.strftime('%d')
 
     if 'time1' in cr:
         t = datetime.datetime.strptime(cr['time1'], '%H:%M')
-        r['start_time'] = t.strftime('%H:%M')
+        r['start_time_hour'] = t.strftime('%H')
+        r['start_time_min'] = t.strftime('%M')
 
     if 'date2' in cr:
         d = datetime.datetime.strptime(cr['date2'], '%Y-%m-%dT%H:%M:%S')
-        r['end_date'] = d.strftime('%Y-%m-%d')
+        r['end_date_year'] = d.strftime('%Y')
+        r['end_date_month'] = d.strftime('%m')
+        r['end_date_day'] = d.strftime('%d')
 
     if 'time2' in cr:
         t = datetime.datetime.strptime(cr['time2'], '%H:%M')
-        r['end_time'] = t.strftime('%H:%M')
+        r['end_time_hour'] = t.strftime('%H')
+        r['end_time_min'] = t.strftime('%M')
 
     if 'callreceived' in cr:
         d = datetime.datetime.strptime(cr['callreceived'], '%Y-%m-%dT%H:%M:%S')
-        r['report_date'] = d.strftime('%Y-%m-%d')
-        r['report_time'] = d.strftime('%H:%M')
+        r['report_date_year'] = d.strftime('%Y')
+        r['report_date_month'] = d.strftime('%m')
+        r['report_date_day'] = d.strftime('%d')
+        r['report_time_hour'] = d.strftime('%H')
+        r['report_time_min'] = d.strftime('%M')
 
     if 'pointx' in cr and 'pointy' in cr:
         lng, lat = _PROJ(float(cr['pointx']),

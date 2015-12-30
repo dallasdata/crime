@@ -106,31 +106,39 @@ def xml_write_record_callback(cw, db, xr):
 
     try:
         d = datetime.datetime.strptime(xr['offensedateofoccurence1'], '%m/%d/%Y')
-        dr['start_date'] = d.strftime('%Y-%m-%d')
+        dr['start_date_year'] = d.strftime('%Y')
+        dr['start_date_month'] = d.strftime('%m')
+        dr['start_date_day'] = d.strftime('%d')
     except:
         pass
 
     try:
         d = datetime.datetime.strptime(xr['offensetimeofoccurence1'], '%H:%M')
-        dr['start_time'] = d.strftime('%H:%M')
+        dr['start_time_hour'] = d.strftime('%H')
+        dr['start_time_min'] = d.strftime('%M')
     except:
         pass
 
     try:
         d = datetime.datetime.strptime(xr['offensedateofoccurence2'], '%m/%d/%Y')
-        dr['end_date'] = d.strftime('%Y-%m-%d')
+        dr['end_date_year'] = d.strftime('%Y')
+        dr['end_date_month'] = d.strftime('%m')
+        dr['end_date_day'] = d.strftime('%d')
     except:
         pass
 
     try:
         d = datetime.datetime.strptime(xr['offensetimeofoccurence2'], '%H:%M')
-        dr['end_time'] = d.strftime('%H:%M')
+        dr['end_time_hour'] = d.strftime('%H')
+        dr['end_time_min'] = d.strftime('%M')
     except:
         pass
 
     try:
         d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
-        dr['report_date'] = d.strftime('%Y-%m-%d')
+        dr['report_date_year'] = d.strftime('%Y')
+        dr['report_date_month'] = d.strftime('%m')
+        dr['report_date_day'] = d.strftime('%d')
     except:
         pass
 
@@ -263,12 +271,21 @@ if args.geocode:
 
 with open_path(args.output_path, 'w') as outf:
     cw = csv.DictWriter(outf, [
-          'start_date',
-          'start_time',
-          'end_date',
-          'end_time',
-          'report_date',
-          'report_time',
+          'start_date_year',
+          'start_date_month',
+          'start_date_day',
+          'start_time_hour',
+          'start_time_min',
+          'end_date_year',
+          'end_date_month',
+          'end_date_day',
+          'end_time_hour',
+          'end_time_min',
+          'report_date_year',
+          'report_date_month',
+          'report_date_day',
+          'report_time_hour',
+          'report_time_min',
           'street_number',
           'street',
           'apartment',
