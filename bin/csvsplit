@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+#
+# The MIT License (MIT)
+#
+# Copyright (c) 2015 dallasdata
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+'''
+Split CSV files into output files based on common fields.
+'''
+
+import argparse
+import csv
+import logging
+import os.path
+
+ap = argparse.ArgumentParser(
+        description='''
+Ingest CSV file(s) with identical fields and split them into a set of files
+named based on a pattern referring to column values.
+''')
+ap.add_argument(
+        '-v', '--verbose', action='count', dest='verbosity', default=0,
+        help='''
+increase global logging verbosity; can be used multiple times
+''')
+ap.add_argument('output_pattern', metavar='<pattern>',
+        help='''
+pattern to use in constructing output filenames; patterns follow the
+str.format() mini-language with each CSV record being fed to the pattern
+using its dict as expected (e.g. '/my/dir/{year:4.4d}-{month:2.2d}.csv')
+''')
+ap.add_argument('input_paths', metavar='<input>', nargs='+',
+        help='''
+file(s) from which to read CSV
+''')
+args = ap.parse_args()
+
+logging.basicConfig(
+        level=logging.ERROR - args.verbosity * 10,
+        style='{',
+        format='{asctime} {levelname} [{name}]: {message}')
+
+for ifp in args.input_paths:
+    with open(ifp, 'r') as ifo:
+        cr = csv.DictReader(ifo)
+        for r in cr:
+            ofp = args.output_pattern.format(**r)
+            needs_header = not os.path.isfile(ofp)
+            with open(ofp, mode='a') as ofo:
+                logging.info('writing a record')
+                cw = csv.DictWriter(ofo, sorted(r.keys()))
+                if needs_header:
+                    cw.writeheader()
+                cw.writerow(r)
