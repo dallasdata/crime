@@ -37,6 +37,10 @@
 #     that to figure out suffixes matches. With the list of queries (from XMLs)
 #     and known-goods (from TIGER) each sorted, this should be O(N) to get good
 #     matches. Will also help with 14-character truncation woes.
+#
+#   - Some input files contain invalid XML entities (e.g.
+#     Offense20080608095354.xml); fix these either by hand or programatically
+#     massage them at runtime
 
 '''
 Transform the XML archives from prior to June 1 2014 into a CSV file.
@@ -46,6 +50,7 @@ import argparse
 import contextlib
 import csv
 import datetime
+import functools
 import logging
 import os.path
 from postgres import Postgres
@@ -82,13 +87,92 @@ STREET_SUFFIXES = [
 
 # Context manager for opening files (or stdin)
 @contextlib.contextmanager
-def open_input(fp, mode='r'):
+def open_path(fp, mode='r'):
+    assert mode in ['r', 'w']
+
     if fp == '-':
-        yield sys.stdin
+        if mode == 'r':
+            yield sys.stdin
+        else:
+            yield sys.stdout
     else:
         f = open(fp, mode)
         yield f
         f.close()
+
+# DPDSAXContentHandler callback for writing a record to a CSV file
+def xml_write_record_callback(cw, db, xr):
+    dr = {}
+
+    try:
+        d = datetime.datetime.strptime(xr['offensedateofoccurence1'], '%m/%d/%Y')
+        dr['start_date'] = d.strftime('%Y-%m-%d')
+    except:
+        pass
+
+    try:
+        d = datetime.datetime.strptime(xr['offensetimeofoccurence1'], '%H:%M')
+        dr['start_time'] = d.strftime('%H:%M')
+    except:
+        pass
+
+    try:
+        d = datetime.datetime.strptime(xr['offensedateofoccurence2'], '%m/%d/%Y')
+        dr['end_date'] = d.strftime('%Y-%m-%d')
+    except:
+        pass
+
+    try:
+        d = datetime.datetime.strptime(xr['offensetimeofoccurence2'], '%H:%M')
+        dr['end_time'] = d.strftime('%H:%M')
+    except:
+        pass
+
+    try:
+        d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
+        dr['report_date'] = d.strftime('%Y-%m-%y')
+    except:
+        pass
+
+    try:
+        dr['street_number'] = int(xr.get('offenseblock'))
+    except:
+        pass
+
+    dr['street'] = xr.get('offensestreet')
+    for ss in STREET_SUFFIXES:
+        if dr['street'].endswith(ss):
+            dr['street'] = dr['street'][:-1 * len(ss)] + ' ' + ss
+            break
+    else:
+        logging.debug('No suffix for {}'.format(dr['street']))
+
+    try:
+        dr['apartment'] = int(xr.get('offenseapartment'))
+    except:
+        pass
+
+    dr['city'] = xr.get('offensecity')
+    dr['state'] = xr.get('offensestate')
+    dr['zipcode'] = xr.get('offensezip')
+    dr['offense_description'] = xr.get('offensedescription')
+
+    # If we have an address, attempt to geocode it
+    if 'street_number' in dr and 'street' in dr and db:
+        r = db.one("select g.rating, ST_X(g.geomout), ST_Y(g.geomout) from geocode('{street_number} {street}, {city}, {state} {zip}', 1) as g;".format(
+            street_number=dr['street_number'],
+            street=dr['street'],
+            city=dr['city'],
+            state=dr['state'],
+            zip=dr['zipcode']))
+
+        # Skip results with confidence worse than 10. The range for this
+        # value is 0-100?, with lower is more confident)
+        if r is not None and r.rating <= 10:
+            dr['longitude'] = r.st_x
+            dr['latitude'] = r.st_y
+
+    cw.writerow(dr)
 
 
 # SAX content handler for DPD crimes
@@ -129,16 +213,37 @@ class DPDSAXContentHandler(xml.sax.ContentHandler):
             self.callback(self.record_attrs)
 
 
+# SAX error handler
+class DPDSAXErrorHandler(xml.sax.ErrorHandler):
+    def warning(self, ex):
+        logging.warning(ex)
+
+    def error(self, ex):
+        logging.error(ex)
+
+    def fatalError(self, ex):
+        raise ex
+
+
 ap = argparse.ArgumentParser(
         description='''
 Convert incident data from prior to June 1, 2014 to our normalized CSV format.
+''')
+ap.add_argument(
+        '-o', metavar='<file>', dest='output_path', action='store', default='-',
+        help='''
+file to write CSV output to; defaults to stdout
 ''')
 ap.add_argument(
         '-v', '--verbose', action='count', dest='verbosity', default=0,
         help='''
 increase global logging verbosity; can be used multiple times
 ''')
-ap.add_argument('file_paths', nargs='*',
+ap.add_argument('--geocode', action='store_true', default=False,
+        help='''
+geocode locations found in source files
+''')
+ap.add_argument('input_paths', nargs='*',
         help='''
 file(s) from which to read XML dumps; if empty stdin is used
 ''')
@@ -149,108 +254,41 @@ logging.basicConfig(
         style='{',
         format='{asctime} {levelname} [{name}]: {message}')
 
-if len(args.file_paths) == 0:
-    args.file_paths += ['-']
+if len(args.input_paths) == 0:
+    args.input_paths += ['-']
 
-db = Postgres('postgres://geocoder:geocoder@localhost/dallas')
+db = None
+if args.geocode:
+    db = Postgres('postgres://geocoder:geocoder@localhost/dallas')
 
-cw = csv.DictWriter(sys.stdout, [
-      'start_date',
-      'start_time',
-      'end_date',
-      'end_time',
-      'report_date',
-      'report_time',
-      'street_number',
-      'street',
-      'apartment',
-      'city',
-      'state',
-      'zipcode',
-      'longitude',
-      'latitude',
-      'offense_description',
-  ])
-cw.writeheader()
+with open_path(args.output_path, 'w') as outf:
+    cw = csv.DictWriter(outf, [
+          'start_date',
+          'start_time',
+          'end_date',
+          'end_time',
+          'report_date',
+          'report_time',
+          'street_number',
+          'street',
+          'apartment',
+          'city',
+          'state',
+          'zipcode',
+          'longitude',
+          'latitude',
+          'offense_description',
+      ])
+    cw.writeheader()
 
-for fp in args.file_paths:
-    logging.warning('processing {}'.format(fp))
+    for fp in args.input_paths:
+        logging.warning('processing {}'.format(fp))
 
-    def record_callback(xr):
-        dr = {}
+        xp = xml.sax.make_parser()
+        xp.setErrorHandler(DPDSAXErrorHandler())
+        xp.setContentHandler(
+                DPDSAXContentHandler(
+                    functools.partial(xml_write_record_callback, cw, db)))
 
-        try:
-            d = datetime.datetime.strptime(xr['offensedateofoccurence1'], '%m/%d/%Y')
-            dr['start_date'] = d.strftime('%Y-%m-%d')
-        except:
-            pass
-
-        try:
-            d = datetime.datetime.strptime(xr['offensetimeofoccurence1'], '%H:%M')
-            dr['start_time'] = d.strftime('%H:%M')
-        except:
-            pass
-
-        try:
-            d = datetime.datetime.strptime(xr['offensedateofoccurence2'], '%m/%d/%Y')
-            dr['end_date'] = d.strftime('%Y-%m-%d')
-        except:
-            pass
-
-        try:
-            d = datetime.datetime.strptime(xr['offensetimeofoccurence2'], '%H:%M')
-            dr['end_time'] = d.strftime('%H:%M')
-        except:
-            pass
-
-        try:
-            d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
-            dr['report_date'] = d.strftime('%Y-%m-%y')
-        except:
-            pass
-
-        try:
-            dr['street_number'] = int(xr.get('offenseblock'))
-        except:
-            pass
-
-        dr['street'] = xr.get('offensestreet')
-        for ss in STREET_SUFFIXES:
-            if dr['street'].endswith(ss):
-                dr['street'] = dr['street'][:-1 * len(ss)] + ' ' + ss
-                break
-        else:
-            logging.debug('No suffix for {}'.format(dr['street']))
-
-        try:
-            dr['apartment'] = int(xr.get('offenseapartment'))
-        except:
-            pass
-
-        dr['city'] = xr.get('offensecity')
-        dr['state'] = xr.get('offensestate')
-        dr['zipcode'] = xr.get('offensezip')
-        dr['offense_description'] = xr.get('offensedescription')
-
-        # If we have an address, attempt to geocode it
-        if 'street_number' in dr and 'street' in dr:
-            r = db.one("select g.rating, ST_X(g.geomout), ST_Y(g.geomout) from geocode('{street_number} {street}, {city}, {state} {zip}', 1) as g;".format(
-                street_number=dr['street_number'],
-                street=dr['street'],
-                city=dr['city'],
-                state=dr['state'],
-                zip=dr['zipcode']))
-
-            # Skip results with confidence worse than 10. The range for this
-            # value is 0-100?, with lower is more confident)
-            if r is not None and r.rating <= 10:
-                dr['longitude'] = r.st_x
-                dr['latitude'] = r.st_y
-
-        cw.writerow(dr)
-
-    xp = xml.sax.make_parser()
-    xp.setContentHandler(DPDSAXContentHandler(record_callback))
-
-    with open_input(fp, 'r') as f:
-        xp.parse(f)
+        with open_path(fp, 'r') as inf:
+            xp.parse(inf)
