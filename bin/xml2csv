@@ -130,7 +130,7 @@ def xml_write_record_callback(cw, db, xr):
 
     try:
         d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
-        dr['report_date'] = d.strftime('%Y-%m-%y')
+        dr['report_date'] = d.strftime('%Y-%m-%d')
     except:
         pass
 
