@@ -103,42 +103,41 @@ def open_path(fp, mode='r'):
 # DPDSAXContentHandler callback for writing a record to a CSV file
 def xml_write_record_callback(cw, dcw, db, xr, loc):
     dr = {}
-
     try:
-        d = datetime.datetime.strptime(xr['offensedateofoccurence1'], '%m/%d/%Y')
-        dr['start_date_year'] = d.strftime('%Y')
-        dr['start_date_month'] = d.strftime('%m')
-        dr['start_date_day'] = d.strftime('%d')
+        m, d, y = map(int, xr['offensedateofoccurence1'].split('/'))
+        dr['start_date_year'] = y
+        dr['start_date_month'] = m
+        dr['start_date_day'] = d
     except:
         pass
 
     try:
-        d = datetime.datetime.strptime(xr['offensetimeofoccurence1'], '%H:%M')
-        dr['start_time_hour'] = d.strftime('%H')
-        dr['start_time_min'] = d.strftime('%M')
+        h, m = map(int, xr['offensetimeofoccurence1'].split(':'))
+        dr['start_time_hour'] = h
+        dr['start_time_min'] = m
     except:
         pass
 
     try:
-        d = datetime.datetime.strptime(xr['offensedateofoccurence2'], '%m/%d/%Y')
-        dr['end_date_year'] = d.strftime('%Y')
-        dr['end_date_month'] = d.strftime('%m')
-        dr['end_date_day'] = d.strftime('%d')
+        m, d, y = map(int, xr['offensedateofoccurence2'].split('/'))
+        dr['end_date_year'] = y
+        dr['end_date_month'] = m
+        dr['end_date_day'] = d
     except:
         pass
 
     try:
-        d = datetime.datetime.strptime(xr['offensetimeofoccurence2'], '%H:%M')
-        dr['end_time_hour'] = d.strftime('%H')
-        dr['end_time_min'] = d.strftime('%M')
+        h, m = map(int, xr['offensetimeofoccurence2'].split(':'))
+        dr['end_time_hour'] = h
+        dr['end_time_min'] = m
     except:
         pass
 
     try:
-        d = datetime.datetime.strptime(xr['offensereporteddate'], '%m/%d/%Y')
-        dr['report_date_year'] = d.strftime('%Y')
-        dr['report_date_month'] = d.strftime('%m')
-        dr['report_date_day'] = d.strftime('%d')
+        m, d, y = map(int, xr['offensereporteddate'].split('/'))
+        dr['report_date_year'] = y
+        dr['report_date_month'] = m
+        dr['report_date_day'] = d
     except:
         pass
 
