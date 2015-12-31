@@ -41,11 +41,15 @@ ap.add_argument(
         help='''
 increase global logging verbosity; can be used multiple times
 ''')
+ap.add_argument('--debug-file', action='store_true', default=False,
+        help='''
+write debug files next to output files
+''')
 ap.add_argument('output_pattern', metavar='<pattern>',
         help='''
 pattern to use in constructing output filenames; patterns follow the
 str.format() mini-language with each CSV record being fed to the pattern
-using its dict as expected (e.g. '/my/dir/{year:4.4d}-{month:2.2d}.csv')
+using its dict as expected (e.g. '/my/dir/{year}-{month}.csv')
 ''')
 ap.add_argument('input_paths', metavar='<input>', nargs='+',
         help='''
@@ -65,8 +69,13 @@ for ifp in args.input_paths:
             ofp = args.output_pattern.format(**r)
             needs_header = not os.path.isfile(ofp)
             with open(ofp, mode='a') as ofo:
-                logging.info('writing a record')
-                cw = csv.DictWriter(ofo, sorted(r.keys()))
+                cw = csv.DictWriter(ofo, cr.fieldnames)
                 if needs_header:
                     cw.writeheader()
                 cw.writerow(r)
+            if args.debug_file:
+                with open(ofp + '.debug', mode='a') as ofo:
+                    cw = csv.DictWriter(ofo, ['path', 'line'])
+                    if needs_header:
+                        cw.writeheader()
+                    cw.writerow({'path': ifp, 'line': cr.line_num})

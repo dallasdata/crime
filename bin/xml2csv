@@ -101,7 +101,7 @@ def open_path(fp, mode='r'):
         f.close()
 
 # DPDSAXContentHandler callback for writing a record to a CSV file
-def xml_write_record_callback(cw, db, xr):
+def xml_write_record_callback(cw, dcw, db, xr, loc):
     dr = {}
 
     try:
@@ -181,16 +181,20 @@ def xml_write_record_callback(cw, db, xr):
             dr['latitude'] = r.st_y
 
     cw.writerow(dr)
+    dcw.writerow(loc)
 
 
 # SAX content handler for DPD crimes
 class DPDSAXContentHandler(xml.sax.ContentHandler):
-    def __init__(self, cb):
+    def __init__(self, cb, path):
         self.callback = cb
+        self.path = path
         self.in_record = False
+        self.record_loc = None
         self.attr_name = None
         self.attr_content = ''
         self.record_attrs = {}
+        self.locator = None
 
     def setDocumentLocator(self, loc):
         self.locator = loc
@@ -200,6 +204,11 @@ class DPDSAXContentHandler(xml.sax.ContentHandler):
 
         if not self.in_record:
             self.in_record = name == 'record'
+            if self.in_record:
+                self.record_loc = {
+                        'path': self.path,
+                        'line': self.locator.getLineNumber(),
+                        'col': self.locator.getColumnNumber()}
         else:
             assert name != 'record'
             self.attr_name = name
@@ -217,8 +226,9 @@ class DPDSAXContentHandler(xml.sax.ContentHandler):
 
         if name == 'record':
             assert self.in_record
+            self.callback(self.record_attrs, self.record_loc)
             self.in_record = False
-            self.callback(self.record_attrs)
+            self.record_loc = None
 
 
 # SAX error handler
@@ -251,6 +261,10 @@ ap.add_argument('--geocode', action='store_true', default=False,
         help='''
 geocode locations found in source files
 ''')
+ap.add_argument('--debug-file', action='store_true', default=False,
+        help='''
+write debug files next to output files
+''')
 ap.add_argument('input_paths', nargs='*',
         help='''
 file(s) from which to read XML dumps; if empty stdin is used
@@ -269,7 +283,15 @@ db = None
 if args.geocode:
     db = Postgres('postgres://geocoder:geocoder@localhost/dallas')
 
-with open_path(args.output_path, 'w') as outf:
+debug_path = '/dev/null'
+if args.debug_file:
+    if args.output_path == '-':
+        logging.warning('unable to create debug file for stdout')
+    else:
+        debug_path = args.output_path + '.debug'
+
+with open_path(args.output_path, 'w') as outf, \
+        open_path(debug_path, 'w') as debugf:
     cw = csv.DictWriter(outf, [
           'start_date_year',
           'start_date_month',
@@ -298,6 +320,9 @@ with open_path(args.output_path, 'w') as outf:
       ])
     cw.writeheader()
 
+    dcw = csv.DictWriter(debugf, ['path', 'line', 'col'])
+    dcw.writeheader()
+
     for fp in args.input_paths:
         logging.warning('processing {}'.format(fp))
 
@@ -305,7 +330,8 @@ with open_path(args.output_path, 'w') as outf:
         xp.setErrorHandler(DPDSAXErrorHandler())
         xp.setContentHandler(
                 DPDSAXContentHandler(
-                    functools.partial(xml_write_record_callback, cw, db)))
+                    functools.partial(xml_write_record_callback, cw, dcw, db),
+                    fp))
 
         with open_path(fp, 'r') as inf:
             xp.parse(inf)
